@@ -1,0 +1,96 @@
+CREATE OR REPLACE PROCEDURE PTA_SP_REPORTS_DATA_EXPORT (
+  p_report_id IN VARCHAR2
+) IS
+
+  CURSOR fixed_tables IS
+    SELECT table_name
+    FROM user_tables
+    WHERE table_name IN (
+      'GRR_CONFIG_REFERENCE_DETAILS',
+      'GRR_USER_CONFIGURABLE_PARAMETERS',
+      'GRR_METADATA_REFERENCE_DETAILS',
+      'GRR_COLUMN_CONFIG_STATICDATA',
+      'GRR_EDC_EXCEL_VALIDATIONS'
+    );
+
+  v_report_column VARCHAR2(30);
+  v_sql            VARCHAR2(4000);
+  v_cur            INTEGER;
+  v_col_cnt        INTEGER;
+  v_desc_tab       DBMS_SQL.DESC_TAB2;
+
+BEGIN
+  DBMS_OUTPUT.ENABLE(1000000);
+
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'STORAGE',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'TABLESPACE',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SEGMENT_ATTRIBUTES',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SQLTERMINATOR',TRUE);
+
+  -- Fixed tables
+  FOR t IN fixed_tables LOOP
+    BEGIN
+      SELECT column_name
+      INTO v_report_column
+      FROM all_tab_columns
+      WHERE table_name = UPPER(t.table_name)
+        AND column_name IN ('REPORT_ID','REPORTID')
+        AND ROWNUM = 1;
+
+      v_sql :=
+        'SELECT * FROM ' || t.table_name ||
+        ' WHERE ' || v_report_column || ' = :1 ' ||
+        ' ORDER BY ' || v_report_column;
+
+      v_cur := DBMS_SQL.OPEN_CURSOR;
+      DBMS_SQL.PARSE(v_cur, v_sql, DBMS_SQL.NATIVE);
+      DBMS_SQL.BIND_VARIABLE(v_cur, ':1', p_report_id);
+      DBMS_SQL.DESCRIBE_COLUMNS2(v_cur, v_col_cnt, v_desc_tab);
+      DBMS_SQL.EXECUTE(v_cur);
+
+      PTA_Print_Insert_From_Cursor(
+        v_cur,
+        t.table_name,
+        v_col_cnt,
+        v_desc_tab
+      );
+
+      DBMS_SQL.CLOSE_CURSOR(v_cur);
+
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        NULL;
+      WHEN OTHERS THEN
+        IF DBMS_SQL.IS_OPEN(v_cur) THEN
+          DBMS_SQL.CLOSE_CURSOR(v_cur);
+        END IF;
+    END;
+  END LOOP;
+
+  -- Dynamic tables
+  FOR t IN (
+    SELECT table_name
+    FROM user_tables
+    WHERE table_name LIKE '%' || p_report_id || '%'
+  ) LOOP
+    v_sql :=
+      'SELECT * FROM ' || t.table_name ||
+      ' ORDER BY 1';
+
+    v_cur := DBMS_SQL.OPEN_CURSOR;
+    DBMS_SQL.PARSE(v_cur, v_sql, DBMS_SQL.NATIVE);
+    DBMS_SQL.DESCRIBE_COLUMNS2(v_cur, v_col_cnt, v_desc_tab);
+    DBMS_SQL.EXECUTE(v_cur);
+
+    PTA_Print_Insert_From_Cursor(
+      v_cur,
+      t.table_name,
+      v_col_cnt,
+      v_desc_tab
+    );
+
+    DBMS_SQL.CLOSE_CURSOR(v_cur);
+  END LOOP;
+
+END PTA_SP_REPORTS_DATA_EXPORT;
+/
