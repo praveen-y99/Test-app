@@ -1,0 +1,18 @@
+FUNCTION PTA_Format_Value (
+  p_val      VARCHAR2,
+  p_col_type NUMBER
+) RETURN VARCHAR2 IS
+BEGIN
+  IF p_val IS NULL THEN
+    RETURN 'NULL';
+
+  ELSIF p_col_type = 12 THEN
+    RETURN
+      'TO_DATE(''' ||
+      TO_CHAR(TO_DATE(p_val), 'YYYY-MM-DD HH24:MI:SS') ||
+      ''',''YYYY-MM-DD HH24:MI:SS'')';
+
+  ELSE
+    RETURN '''' || REPLACE(p_val, '''', '''''') || '''';
+  END IF;
+END;
