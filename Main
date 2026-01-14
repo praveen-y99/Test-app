@@ -2,6 +2,7 @@ CREATE OR REPLACE PROCEDURE PTA_SP_REPORTS_DATA_EXPORT (
   p_report_id IN VARCHAR2
 ) IS
 
+  /* Fixed tables */
   CURSOR c_fixed_tables IS
     SELECT table_name
     FROM user_tables
@@ -13,22 +14,31 @@ CREATE OR REPLACE PROCEDURE PTA_SP_REPORTS_DATA_EXPORT (
       'GRR_EDC_EXCEL_VALIDATIONS'
     );
 
-  v_report_column  VARCHAR2(30);
-  v_sql            VARCHAR2(4000);
-  v_cur            INTEGER;
-  v_col_cnt        INTEGER;
-  v_desc_tab       DBMS_SQL.DESC_TAB2;
-  v_exec_status    INTEGER;
+  v_report_column   VARCHAR2(30);
+  v_sql             VARCHAR2(4000);
+  v_cur             INTEGER;
+  v_col_cnt         INTEGER;
+  v_desc_tab        DBMS_SQL.DESC_TAB2;
+  v_exec_status     INTEGER;
+  v_row_count       INTEGER;
+  v_sequence_name   VARCHAR2(200);
 
 BEGIN
   DBMS_OUTPUT.ENABLE(1000000);
 
+  /* Metadata settings (same as original) */
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'STORAGE',FALSE);
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'TABLESPACE',FALSE);
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SEGMENT_ATTRIBUTES',FALSE);
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SQLTERMINATOR',TRUE);
 
-  -- Fixed tables export
+  DBMS_OUTPUT.PUT_LINE('-- =======================================');
+  DBMS_OUTPUT.PUT_LINE('-- START EXPORT FOR REPORT_ID : ' || p_report_id);
+  DBMS_OUTPUT.PUT_LINE('-- =======================================');
+
+  ------------------------------------------------------------------
+  -- FIXED TABLE EXPORT (NO ROW COUNT CHECK)
+  ------------------------------------------------------------------
   FOR t IN c_fixed_tables LOOP
     BEGIN
       SELECT column_name
@@ -37,6 +47,8 @@ BEGIN
       WHERE table_name = UPPER(t.table_name)
         AND column_name IN ('REPORT_ID','REPORTID')
         AND ROWNUM = 1;
+
+      DBMS_OUTPUT.PUT_LINE('-- Exporting fixed table : ' || t.table_name);
 
       v_sql :=
         'SELECT * FROM ' || t.table_name ||
@@ -68,30 +80,93 @@ BEGIN
     END;
   END LOOP;
 
-  -- Dynamic tables (report_id in table name)
+  ------------------------------------------------------------------
+  -- DYNAMIC TABLE EXPORT (SCHEMA ALWAYS, DATA ONLY IF < 200 ROWS)
+  ------------------------------------------------------------------
   FOR t IN (
     SELECT table_name
     FROM user_tables
     WHERE table_name LIKE '%' || p_report_id || '%'
   ) LOOP
-    v_sql :=
-      'SELECT * FROM ' || t.table_name ||
-      ' ORDER BY 1';
 
-    v_cur := DBMS_SQL.OPEN_CURSOR;
-    DBMS_SQL.PARSE(v_cur, v_sql, DBMS_SQL.NATIVE);
-    DBMS_SQL.DESCRIBE_COLUMNS2(v_cur, v_col_cnt, v_desc_tab);
-    v_exec_status := DBMS_SQL.EXECUTE(v_cur);
+    DBMS_OUTPUT.PUT_LINE('-- =======================================');
+    DBMS_OUTPUT.PUT_LINE('-- Processing dynamic table : ' || t.table_name);
+    DBMS_OUTPUT.PUT_LINE('-- =======================================');
 
-    PTA_Print_Insert_From_Cursor(
-      v_cur,
-      t.table_name,
-      v_col_cnt,
-      v_desc_tab
+    ----------------------------------------------------------------
+    -- SEQUENCE CREATION
+    ----------------------------------------------------------------
+    BEGIN
+      SELECT sequence_name
+      INTO v_sequence_name
+      FROM user_sequences
+      WHERE sequence_name = t.table_name || '_SEQ'
+        AND ROWNUM = 1;
+
+      DBMS_OUTPUT.PUT_LINE('-- Sequence exists : ' || v_sequence_name);
+
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        v_sequence_name := t.table_name || '_SEQ';
+
+        DBMS_OUTPUT.PUT_LINE('-- Creating sequence : ' || v_sequence_name);
+        DBMS_OUTPUT.PUT_LINE(
+          'CREATE SEQUENCE ' || v_sequence_name ||
+          ' MINVALUE 1 MAXVALUE 999999999999999999 ' ||
+          ' INCREMENT BY 1 START WITH 1;'
+        );
+    END;
+
+    ----------------------------------------------------------------
+    -- TABLE CREATION (DDL)
+    ----------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE('-- Creating table : ' || t.table_name);
+    DBMS_OUTPUT.PUT_LINE(
+      DBMS_METADATA.GET_DDL('TABLE', t.table_name)
     );
 
-    DBMS_SQL.CLOSE_CURSOR(v_cur);
+    ----------------------------------------------------------------
+    -- ROW COUNT CHECK (DATA ONLY)
+    ----------------------------------------------------------------
+    EXECUTE IMMEDIATE
+      'SELECT COUNT(*) FROM ' || t.table_name
+      INTO v_row_count;
+
+    IF v_row_count > 200 THEN
+      DBMS_OUTPUT.PUT_LINE(
+        '-- Skipping data export for ' || t.table_name ||
+        ' (row count = ' || v_row_count || ')'
+      );
+    ELSE
+      DBMS_OUTPUT.PUT_LINE(
+        '-- Exporting data for ' || t.table_name ||
+        ' (row count = ' || v_row_count || ')'
+      );
+
+      v_sql :=
+        'SELECT * FROM ' || t.table_name ||
+        ' ORDER BY 1';
+
+      v_cur := DBMS_SQL.OPEN_CURSOR;
+      DBMS_SQL.PARSE(v_cur, v_sql, DBMS_SQL.NATIVE);
+      DBMS_SQL.DESCRIBE_COLUMNS2(v_cur, v_col_cnt, v_desc_tab);
+      v_exec_status := DBMS_SQL.EXECUTE(v_cur);
+
+      PTA_Print_Insert_From_Cursor(
+        v_cur,
+        t.table_name,
+        v_col_cnt,
+        v_desc_tab
+      );
+
+      DBMS_SQL.CLOSE_CURSOR(v_cur);
+    END IF;
+
   END LOOP;
+
+  DBMS_OUTPUT.PUT_LINE('-- =======================================');
+  DBMS_OUTPUT.PUT_LINE('-- EXPORT COMPLETED');
+  DBMS_OUTPUT.PUT_LINE('-- =======================================');
 
 END PTA_SP_REPORTS_DATA_EXPORT;
 /
