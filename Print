@@ -1,0 +1,46 @@
+PROCEDURE PTA_Print_Insert_From_Cursor (
+  p_cursor   IN INTEGER,
+  p_table    IN VARCHAR2,
+  p_col_cnt  IN INTEGER,
+  p_desc_tab IN DBMS_SQL.DESC_TAB2
+) IS
+  v_val       VARCHAR2(4000);
+  v_col_list  VARCHAR2(4000);
+  v_val_list  VARCHAR2(4000);
+  v_valid_cnt INTEGER := 0;
+  v_valid_cols SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
+BEGIN
+  FOR i IN 1 .. p_col_cnt LOOP
+    IF PTA_Is_Exportable_Column(p_desc_tab(i).col_name) THEN
+      v_valid_cnt := v_valid_cnt + 1;
+      v_valid_cols.EXTEND;
+      v_valid_cols(v_valid_cnt) := i;
+      DBMS_SQL.DEFINE_COLUMN(p_cursor, i, v_val, 4000);
+    END IF;
+  END LOOP;
+
+  WHILE DBMS_SQL.FETCH_ROWS(p_cursor) > 0 LOOP
+    v_col_list := '';
+    v_val_list := '';
+
+    FOR j IN 1 .. v_valid_cnt LOOP
+      DBMS_SQL.COLUMN_VALUE(p_cursor, v_valid_cols(j), v_val);
+
+      v_col_list :=
+        v_col_list || p_desc_tab(v_valid_cols(j)).col_name || ',';
+
+      v_val_list :=
+        v_val_list ||
+        PTA_Format_Value(
+          v_val,
+          p_desc_tab(v_valid_cols(j)).col_type
+        ) || ',';
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE(
+      'INSERT INTO ' || p_table ||
+      ' (' || RTRIM(v_col_list, ',') ||
+      ') VALUES (' || RTRIM(v_val_list, ',') || ');'
+    );
+  END LOOP;
+END;
