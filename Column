@@ -1,0 +1,6 @@
+FUNCTION PTA_Is_Exportable_Column (
+  p_col_name VARCHAR2
+) RETURN BOOLEAN IS
+BEGIN
+  RETURN UPPER(p_col_name) <> 'SEQ_NO';
+END;
