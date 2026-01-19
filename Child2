@@ -1,0 +1,77 @@
+CREATE OR REPLACE PROCEDURE PTA_EXPORT_TABLE_DATA (
+  p_table_name   IN VARCHAR2,
+  p_where_col    IN VARCHAR2 DEFAULT NULL,
+  p_where_val    IN VARCHAR2 DEFAULT NULL,
+  p_order_by     IN VARCHAR2 DEFAULT NULL
+) IS
+  v_sql         VARCHAR2(4000);
+  v_cur         INTEGER;
+  v_col_cnt     INTEGER;
+  v_desc_tab    DBMS_SQL.DESC_TAB2;
+  v_exec_status INTEGER;
+  v_val         VARCHAR2(4000);
+  v_col_list    VARCHAR2(4000);
+  v_val_list    VARCHAR2(4000);
+BEGIN
+  v_sql := 'SELECT * FROM ' || p_table_name;
+
+  IF p_where_col IS NOT NULL THEN
+    v_sql := v_sql || ' WHERE ' || p_where_col || ' = :1';
+  END IF;
+
+  IF p_order_by IS NOT NULL THEN
+    v_sql := v_sql || ' ORDER BY ' || p_order_by;
+  END IF;
+
+  v_cur := DBMS_SQL.OPEN_CURSOR;
+  DBMS_SQL.PARSE(v_cur, v_sql, DBMS_SQL.NATIVE);
+
+  IF p_where_col IS NOT NULL THEN
+    DBMS_SQL.BIND_VARIABLE(v_cur, ':1', p_where_val);
+  END IF;
+
+  DBMS_SQL.DESCRIBE_COLUMNS2(v_cur, v_col_cnt, v_desc_tab);
+  v_exec_status := DBMS_SQL.EXECUTE(v_cur);
+
+  FOR i IN 1 .. v_col_cnt LOOP
+    IF UPPER(v_desc_tab(i).col_name) <> 'SEQ_NO' THEN
+      DBMS_SQL.DEFINE_COLUMN(v_cur, i, v_val, 4000);
+    END IF;
+  END LOOP;
+
+  WHILE DBMS_SQL.FETCH_ROWS(v_cur) > 0 LOOP
+    v_col_list := '';
+    v_val_list := '';
+
+    FOR i IN 1 .. v_col_cnt LOOP
+      IF UPPER(v_desc_tab(i).col_name) <> 'SEQ_NO' THEN
+        DBMS_SQL.COLUMN_VALUE(v_cur, i, v_val);
+
+        v_col_list := v_col_list || v_desc_tab(i).col_name || ',';
+
+        IF v_val IS NULL THEN
+          v_val_list := v_val_list || 'NULL,';
+        ELSIF v_desc_tab(i).col_type = 12 THEN
+          v_val_list :=
+            v_val_list ||
+            'TO_DATE(''' ||
+            TO_CHAR(TO_DATE(v_val),'YYYY-MM-DD HH24:MI:SS') ||
+            ''',''YYYY-MM-DD HH24:MI:SS''),';
+        ELSE
+          v_val_list :=
+            v_val_list || '''' ||
+            REPLACE(v_val,'''','''''') || ''',';
+        END IF;
+      END IF;
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE(
+      'INSERT INTO ' || p_table_name ||
+      ' (' || RTRIM(v_col_list, ',') || ') VALUES (' ||
+      RTRIM(v_val_list, ',') || ');'
+    );
+  END LOOP;
+
+  DBMS_SQL.CLOSE_CURSOR(v_cur);
+END PTA_EXPORT_TABLE_DATA;
+/
