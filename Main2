@@ -1,0 +1,113 @@
+CREATE OR REPLACE PROCEDURE PTA_SP_REPORTS_DATA_EXPORT (
+  p_report_id IN VARCHAR2
+) IS
+
+  CURSOR c_fixed_tables IS
+    SELECT table_name
+    FROM user_tables
+    WHERE table_name IN (
+      'GRR_CONFIG_REFERENCE_DETAILS',
+      'GRR_USER_CONFIGURABLE_PARAMETERS',
+      'GRR_METADATA_REFERENCE_DETAILS',
+      'GRR_COLUMN_CONFIG_STATICDATA',
+      'GRR_EDC_EXCEL_VALIDATIONS'
+    );
+
+  v_report_column VARCHAR2(30);
+  v_row_count     INTEGER;
+  v_seq_name      VARCHAR2(200);
+  v_pk_index      VARCHAR2(200);
+
+BEGIN
+  DBMS_OUTPUT.ENABLE(1000000);
+
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'STORAGE',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'TABLESPACE',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SEGMENT_ATTRIBUTES',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'EMIT_SCHEMA',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'CONSTRAINTS',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'REF_CONSTRAINTS',FALSE);
+  DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM,'SQLTERMINATOR',TRUE);
+
+  ------------------------------------------------------------
+  -- FIXED TABLES
+  ------------------------------------------------------------
+  FOR t IN c_fixed_tables LOOP
+    BEGIN
+      SELECT column_name
+      INTO v_report_column
+      FROM all_tab_columns
+      WHERE table_name = UPPER(t.table_name)
+        AND column_name IN ('REPORT_ID','REPORTID')
+        AND ROWNUM = 1;
+
+      PTA_EXPORT_TABLE_DATA(
+        p_table_name => t.table_name,
+        p_where_col  => v_report_column,
+        p_where_val  => p_report_id,
+        p_order_by   => v_report_column
+      );
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN NULL;
+    END;
+  END LOOP;
+
+  ------------------------------------------------------------
+  -- DYNAMIC TABLES
+  ------------------------------------------------------------
+  FOR t IN (
+    SELECT table_name
+    FROM user_tables
+    WHERE table_name LIKE '%' || p_report_id || '%'
+  ) LOOP
+
+    -- Sequence
+    BEGIN
+      SELECT sequence_name
+      INTO v_seq_name
+      FROM user_sequences
+      WHERE sequence_name = t.table_name || '_SEQ';
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE(
+          'CREATE SEQUENCE ' || t.table_name || '_SEQ START WITH 1 INCREMENT BY 1;'
+        );
+    END;
+
+    -- Table DDL
+    DBMS_OUTPUT.PUT_LINE(DBMS_METADATA.GET_DDL('TABLE', t.table_name));
+
+    -- PK only
+    BEGIN
+      SELECT index_name
+      INTO v_pk_index
+      FROM user_constraints
+      WHERE table_name = t.table_name
+        AND constraint_type = 'P';
+
+      DBMS_OUTPUT.PUT_LINE(DBMS_METADATA.GET_DDL('INDEX', v_pk_index));
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN NULL;
+    END;
+
+    -- Data
+    EXECUTE IMMEDIATE
+      'SELECT COUNT(*) FROM ' || t.table_name
+      INTO v_row_count;
+
+    IF v_row_count <= 200 THEN
+      PTA_EXPORT_TABLE_DATA(
+        p_table_name => t.table_name,
+        p_order_by   => '1'
+      );
+    ELSE
+      DBMS_OUTPUT.PUT_LINE(
+        '-- Data skipped for ' || t.table_name ||
+        ' (row count = ' || v_row_count || ')'
+      );
+    END IF;
+
+  END LOOP;
+
+END PTA_SP_REPORTS_DATA_EXPORT;
+/
