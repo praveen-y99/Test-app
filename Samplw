@@ -1,55 +1,93 @@
-CASE
-    WHEN (
-        SELECT COUNT(*)
-        FROM (
-            SELECT TRIM(
-                       REGEXP_SUBSTR(
-                           REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
-                           '[^,]+',
-                           1,
-                           LEVEL
-                       )
-                   ) col_id
-            FROM dual
-            CONNECT BY LEVEL <=
-                REGEXP_COUNT(
-                    REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
-                    ','
-                ) + 1
-        ) c
-        JOIN euc_report_data_validations v
-             ON v.reportid = a.reportid
-            AND v.column_id = c.col_id
-    ) > 0
+SELECT a.execution_id,
 
-    THEN
-        REGEXP_REPLACE(
-            x.token,
-            ':.*$',
-            ':' || (
-                SELECT LISTAGG(v.column_name, ',')
-                       WITHIN GROUP (ORDER BY v.column_id)
-                FROM (
+       LISTAGG(
+           CASE
+               WHEN resolved_names IS NOT NULL
+               THEN REGEXP_REPLACE(
+                        x.token,
+                        ':(.*)$',
+                        ':' || resolved_names
+                    )
+               ELSE x.token
+           END,
+           CHR(10)
+       ) WITHIN GROUP (ORDER BY x.lvl) AS mandatorycheck_output
+
+FROM euc_data_validation_audit a
+
+CROSS JOIN LATERAL (
+
+    SELECT LEVEL lvl,
+
+           TRIM(
+               REGEXP_SUBSTR(
+                   DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
+                   '[^|]+',
+                   1,
+                   LEVEL
+               )
+           ) AS token,
+
+           (
+               SELECT LISTAGG(v.column_name, ',')
+                      WITHIN GROUP (ORDER BY v.column_id)
+
+               FROM (
+
                     SELECT TRIM(
                                REGEXP_SUBSTR(
-                                   REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                                   REGEXP_SUBSTR(
+                                       TRIM(
+                                           REGEXP_SUBSTR(
+                                               DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
+                                               '[^|]+',
+                                               1,
+                                               LEVEL
+                                           )
+                                       ),
+                                       '[^:]+$',
+                                       1,
+                                       1
+                                   ),
                                    '[^,]+',
                                    1,
                                    LEVEL
                                )
-                           ) col_id
+                           ) AS col_id
                     FROM dual
                     CONNECT BY LEVEL <=
                         REGEXP_COUNT(
-                            REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                            REGEXP_SUBSTR(
+                                TRIM(
+                                    REGEXP_SUBSTR(
+                                        DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
+                                        '[^|]+',
+                                        1,
+                                        LEVEL
+                                    )
+                                ),
+                                '[^:]+$',
+                                1,
+                                1
+                            ),
                             ','
                         ) + 1
-                ) c
-                JOIN euc_report_data_validations v
-                     ON v.reportid = a.reportid
-                    AND v.column_id = c.col_id
-            )
-        )
+               ) c
 
-    ELSE x.token
-END
+               JOIN euc_report_data_validations v
+                    ON v.reportid = a.reportid
+                   AND v.column_id = c.col_id
+
+           ) AS resolved_names
+
+    FROM dual
+
+    CONNECT BY LEVEL <=
+        REGEXP_COUNT(
+            DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
+            '\|'
+        ) + 1
+
+) x
+
+GROUP BY a.execution_id;
