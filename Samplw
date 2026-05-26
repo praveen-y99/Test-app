@@ -1,0 +1,25 @@
+SELECT t.execution_id,
+       LISTAGG(
+           REGEXP_SUBSTR(x.token, '^[^:]+') || ':' || NVL(m.column_name,
+           REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1)),
+           CHR(10)
+       ) WITHIN GROUP (ORDER BY x.seq) AS final_output
+FROM euc_data_validation_audit t
+
+CROSS JOIN LATERAL (
+    SELECT LEVEL seq,
+           TRIM(REGEXP_SUBSTR(t.mandatorycheck_details,
+                              '[^|]+',
+                              1,
+                              LEVEL)) AS token
+    FROM dual
+    CONNECT BY LEVEL <= REGEXP_COUNT(t.mandatorycheck_details, '\|') + 1
+) x
+
+LEFT JOIN column_master m
+       ON m.column_id = TRIM(REGEXP_SUBSTR(x.token,
+                                           '[^:]+$',
+                                           1,
+                                           1))
+
+GROUP BY t.execution_id;
