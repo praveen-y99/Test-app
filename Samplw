@@ -1,54 +1,55 @@
-SELECT a.execution_id,
+CASE
+    WHEN (
+        SELECT COUNT(*)
+        FROM (
+            SELECT TRIM(
+                       REGEXP_SUBSTR(
+                           REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                           '[^,]+',
+                           1,
+                           LEVEL
+                       )
+                   ) col_id
+            FROM dual
+            CONNECT BY LEVEL <=
+                REGEXP_COUNT(
+                    REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                    ','
+                ) + 1
+        ) c
+        JOIN euc_report_data_validations v
+             ON v.reportid = a.reportid
+            AND v.column_id = c.col_id
+    ) > 0
 
-       LISTAGG(
-           REGEXP_REPLACE(
-               x.token,
-               ':.*$',
-               ':' || (
-                   SELECT LISTAGG(v.column_name, ',')
-                          WITHIN GROUP (ORDER BY v.column_id)
-                   FROM (
-                        SELECT TRIM(
-                                   REGEXP_SUBSTR(
-                                       REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
-                                       '[^,]+',
-                                       1,
-                                       LEVEL
-                                   )
-                               ) col_id
-                        FROM dual
-                        CONNECT BY LEVEL <=
-                            REGEXP_COUNT(
-                                REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
-                                ','
-                            ) + 1
-                   ) c
-                   JOIN euc_report_data_validations v
-                        ON v.report_id = a.report_id
-                       AND v.column_id = c.col_id
-               )
-           ),
-           CHR(10)
-       ) WITHIN GROUP (ORDER BY x.lvl) AS mandatorycheck_output
+    THEN
+        REGEXP_REPLACE(
+            x.token,
+            ':.*$',
+            ':' || (
+                SELECT LISTAGG(v.column_name, ',')
+                       WITHIN GROUP (ORDER BY v.column_id)
+                FROM (
+                    SELECT TRIM(
+                               REGEXP_SUBSTR(
+                                   REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                                   '[^,]+',
+                                   1,
+                                   LEVEL
+                               )
+                           ) col_id
+                    FROM dual
+                    CONNECT BY LEVEL <=
+                        REGEXP_COUNT(
+                            REGEXP_SUBSTR(x.token, '[^:]+$', 1, 1),
+                            ','
+                        ) + 1
+                ) c
+                JOIN euc_report_data_validations v
+                     ON v.reportid = a.reportid
+                    AND v.column_id = c.col_id
+            )
+        )
 
-FROM euc_data_validation_audit a
-
-CROSS JOIN LATERAL (
-    SELECT LEVEL lvl,
-           TRIM(
-               REGEXP_SUBSTR(
-                   DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
-                   '[^|]+',
-                   1,
-                   LEVEL
-               )
-           ) token
-    FROM dual
-    CONNECT BY LEVEL <=
-        REGEXP_COUNT(
-            DBMS_LOB.SUBSTR(a.mandatorycheck_details, 4000, 1),
-            '\|'
-        ) + 1
-) x
-
-GROUP BY a.execution_id;
+    ELSE x.token
+END
