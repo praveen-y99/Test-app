@@ -1,0 +1,70 @@
+SELECT a.execution_id,
+
+       LISTAGG(x.output, CHR(10))
+       WITHIN GROUP (ORDER BY x.lvl) mandatorycheck_output
+
+FROM (
+        SELECT execution_id,
+               reportid,
+               DBMS_LOB.SUBSTR(mandatorycheck_details,4000,1) details
+        FROM euc_data_validation_audit
+        WHERE mandatorycheck_details IS NOT NULL
+     ) a
+
+CROSS APPLY (
+
+    SELECT LEVEL lvl,
+
+           REGEXP_SUBSTR(a.details,'^[^|]+',1,LEVEL) token,
+
+           REGEXP_SUBSTR(
+               REGEXP_SUBSTR(a.details,'[^|]+',1,LEVEL),
+               '^[^:]+'
+           )
+           || ':' ||
+
+           (
+               SELECT LISTAGG(
+                          NVL(v.column_name,c.col_id),
+                          ','
+                      ) WITHIN GROUP (ORDER BY c.pos)
+
+               FROM (
+                       SELECT LEVEL pos,
+
+                              TRIM(REGEXP_SUBSTR(
+                                  REGEXP_SUBSTR(
+                                      REGEXP_SUBSTR(a.details,'[^|]+',1,LEVEL),
+                                      '[^:]+$'
+                                  ),
+                                  '[^,]+',
+                                  1,
+                                  LEVEL
+                              )) col_id
+
+                       FROM dual
+
+                       CONNECT BY LEVEL <=
+                           REGEXP_COUNT(
+                               REGEXP_SUBSTR(
+                                   REGEXP_SUBSTR(a.details,'[^|]+',1,LEVEL),
+                                   '[^:]+$'
+                               ),
+                               ','
+                           ) + 1
+                    ) c
+
+               LEFT JOIN euc_report_data_validations v
+                      ON v.reportid = a.reportid
+                     AND v.column_id = c.col_id
+           ) output
+
+    FROM dual
+
+    CONNECT BY LEVEL <= REGEXP_COUNT(a.details,'\|') + 1
+
+) x
+
+GROUP BY a.execution_id
+
+ORDER BY a.execution_id;
