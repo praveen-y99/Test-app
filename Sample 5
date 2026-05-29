@@ -1,0 +1,87 @@
+CREATE OR REPLACE FUNCTION transform_validation_clob(
+    p_reportid NUMBER,
+    p_clob     CLOB
+) RETURN CLOB
+IS
+    l_result CLOB;
+BEGIN
+    SELECT RTRIM(
+             XMLCAST(
+               XMLAGG(
+                 XMLELEMENT(
+                   e,
+                   CASE
+                     WHEN INSTR(token, ':') > 0 THEN
+                       SUBSTR(token, 1, INSTR(token, ':'))
+                       ||
+                       (
+                         SELECT RTRIM(
+                                  XMLCAST(
+                                    XMLAGG(
+                                      XMLELEMENT(
+                                        e,
+                                        NVL(v.column_name, c.col_id) || ','
+                                      )
+                                      ORDER BY c.pos
+                                    ) AS CLOB
+                                  ),
+                                  ','
+                                )
+                         FROM (
+                                SELECT LEVEL pos,
+                                       TRIM(REGEXP_SUBSTR(
+                                           SUBSTR(token, INSTR(token, ':') + 1),
+                                           '[^,]+',
+                                           1,
+                                           LEVEL
+                                       )) col_id
+                                FROM dual
+                                CONNECT BY LEVEL <=
+                                    REGEXP_COUNT(
+                                        SUBSTR(token, INSTR(token, ':') + 1),
+                                        ','
+                                    ) + 1
+                              ) c
+                         LEFT JOIN euc_report_data_validations v
+                                ON v.reportid = p_reportid
+                               AND v.column_id = c.col_id
+                       )
+                     ELSE token
+                   END || CHR(10)
+                 )
+                 ORDER BY seq
+               ) AS CLOB
+             ),
+             CHR(10)
+           )
+    INTO l_result
+    FROM (
+        SELECT LEVEL seq,
+               TRIM(REGEXP_SUBSTR(p_clob,'[^|]+',1,LEVEL)) token
+        FROM dual
+        CONNECT BY LEVEL <= REGEXP_COUNT(p_clob,'\|') + 1
+    );
+
+    RETURN l_result;
+END;
+/
+
+
+
+CREATE OR REPLACE VIEW VW_DATA_VALIDATION_OUTPUT AS
+SELECT
+    execution_id,
+    reportid,
+
+    transform_validation_clob(
+        reportid,
+        mandatorycheck_details
+    ) AS mandatorycheck_output,
+
+    transform_validation_clob(
+        reportid,
+        datatypecheckdetails
+    ) AS datatypecheck_output
+
+FROM euc_data_validation_audit;
+/
