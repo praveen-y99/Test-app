@@ -1,0 +1,124 @@
+SELECT a.execution_id,
+
+       m.output mandatorycheck_output,
+       d.output datatypecheck_output
+
+FROM (
+        SELECT execution_id,
+               reportid,
+               DBMS_LOB.SUBSTR(mandatorycheck_details,4000,1) mandatory_details,
+               DBMS_LOB.SUBSTR(datatypecheckdetails,4000,1) datatype_details
+        FROM euc_data_validation_audit
+     ) a
+
+CROSS APPLY (
+
+    SELECT LISTAGG(x.val, CHR(10))
+           WITHIN GROUP (ORDER BY x.lvl) output
+
+    FROM (
+
+        SELECT LEVEL lvl,
+
+               REGEXP_SUBSTR(a.mandatory_details,'^[^|]+',1,LEVEL)
+               || ':' ||
+
+               (
+                   SELECT LISTAGG(
+                              NVL(v.column_name,c.col_id),
+                              ','
+                          ) WITHIN GROUP (ORDER BY c.pos)
+
+                   FROM (
+                           SELECT LEVEL pos,
+
+                                  TRIM(REGEXP_SUBSTR(
+                                      REGEXP_SUBSTR(
+                                          REGEXP_SUBSTR(a.mandatory_details,'[^|]+',1,LEVEL),
+                                          '[^:]+$'
+                                      ),
+                                      '[^,]+',
+                                      1,
+                                      LEVEL
+                                  )) col_id
+
+                           FROM dual
+
+                           CONNECT BY LEVEL <=
+                               REGEXP_COUNT(
+                                   REGEXP_SUBSTR(
+                                       REGEXP_SUBSTR(a.mandatory_details,'[^|]+',1,LEVEL),
+                                       '[^:]+$'
+                                   ),
+                                   ','
+                               ) + 1
+                        ) c
+
+                   LEFT JOIN euc_report_data_validations v
+                          ON v.reportid = a.reportid
+                         AND v.column_id = c.col_id
+               ) val
+
+        FROM dual
+
+        CONNECT BY LEVEL <=
+            REGEXP_COUNT(a.mandatory_details,'\|') + 1
+    ) x
+
+) m
+
+CROSS APPLY (
+
+    SELECT LISTAGG(x.val, CHR(10))
+           WITHIN GROUP (ORDER BY x.lvl) output
+
+    FROM (
+
+        SELECT LEVEL lvl,
+
+               REGEXP_SUBSTR(a.datatype_details,'^[^|]+',1,LEVEL)
+               || ':' ||
+
+               (
+                   SELECT LISTAGG(
+                              NVL(v.column_name,c.col_id),
+                              ','
+                          ) WITHIN GROUP (ORDER BY c.pos)
+
+                   FROM (
+                           SELECT LEVEL pos,
+
+                                  TRIM(REGEXP_SUBSTR(
+                                      REGEXP_SUBSTR(
+                                          REGEXP_SUBSTR(a.datatype_details,'[^|]+',1,LEVEL),
+                                          '[^:]+$'
+                                      ),
+                                      '[^,]+',
+                                      1,
+                                      LEVEL
+                                  )) col_id
+
+                           FROM dual
+
+                           CONNECT BY LEVEL <=
+                               REGEXP_COUNT(
+                                   REGEXP_SUBSTR(
+                                       REGEXP_SUBSTR(a.datatype_details,'[^|]+',1,LEVEL),
+                                       '[^:]+$'
+                                   ),
+                                   ','
+                               ) + 1
+                        ) c
+
+                   LEFT JOIN euc_report_data_validations v
+                          ON v.reportid = a.reportid
+                         AND v.column_id = c.col_id
+               ) val
+
+        FROM dual
+
+        CONNECT BY LEVEL <=
+            REGEXP_COUNT(a.datatype_details,'\|') + 1
+    ) x
+
+) d;
